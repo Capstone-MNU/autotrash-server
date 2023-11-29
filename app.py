@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import mysql.connector
 from datetime import datetime
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -19,11 +20,16 @@ def detect_objects():
     image = cv2.imdecode(np.frombuffer(image_file.read(), np.uint8), cv2.IMREAD_COLOR)
     
     # YOLOv8을 사용하여 객체 검출 수행
-    result = model(image, max_det=1)
-    box = result[0].boxes
+    result = model(image, max_det=1).cuda()
+    result = result[0]
+    box = result.boxes
     cls = int(box[0].cls)
-    probs = result[0].probs
+    probs = result.probs
     pred_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    im_array = result.plot()  # plot a BGR numpy array of predictions
+    im = Image.fromarray(im_array[..., ::-1])  # RGB PIL image
+    im.save('results/result.jpg')  # save image
 
     # 검출된 객체 정보를 MySQL DB에 저장
     # MySQL DB에 접속
@@ -40,7 +46,7 @@ def detect_objects():
     sql = "INSERT INTO trash_pred (class, probs, pred_time) VALUES (%s, %s, %s)"
     values = (cls, probs, pred_time)
     cursor.execute(sql, values)
-    
+
     # 커밋
     db.commit()
 
