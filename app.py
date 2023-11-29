@@ -2,6 +2,7 @@ from flask import Flask, request
 import cv2
 import numpy as np
 import mysql.connector
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -20,9 +21,10 @@ def detect_objects():
     # YOLOv8을 사용하여 객체 검출 수행
     result = model(image, max_det=1)
     box = result[0].boxes
-    pred_cls = int(box[0].cls)
-    pred_probs = result[0].probs
-    
+    cls = int(box[0].cls)
+    probs = result[0].probs
+    pred_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
     # 검출된 객체 정보를 MySQL DB에 저장
     # MySQL DB에 접속
     db = mysql.connector.connect(
@@ -32,12 +34,13 @@ def detect_objects():
         database="rkdtjddn132"
     )
     cursor = db.cursor()
-    # 커서 생성
-
 
     # 검출 결과를 MySQL DB에 저장
-    # ...
-
+    # table: trash_pred, value: class, probs, pred_time
+    sql = "INSERT INTO trash_pred (class, probs, pred_time) VALUES (%s, %s, %s)"
+    values = (cls, probs, pred_time)
+    cursor.execute(sql, values)
+    
     # 커밋
     db.commit()
 
@@ -45,11 +48,6 @@ def detect_objects():
     db.close()
 
     return 'Object detection result saved in MySQL DB'
-
-
-
-
-
 
 
 if __name__ == '__main__':
