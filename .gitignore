@@ -282,3 +282,8 @@ pyrightconfig.json
 
 # weight files
 *.pt
+# images
+.jpg
+.jpeg
+.png
+
