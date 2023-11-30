@@ -1,60 +1,67 @@
 from flask import Flask, request
 import cv2
 import numpy as np
-import mysql.connector
 from datetime import datetime
-from PIL import Image
+import torch
+import pymysql
+pymysql.install_as_MySQLdb()
 
 app = Flask(__name__)
 
-# 객체 검출을 위한 YOLOv8 모델 로드
+from flask_sqlalchemy import SQLAlchemy
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:0000@localhost/autotrash'
+db = SQLAlchemy(app)
+
+class TrashPred(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    cls = db.Column(db.String(255), nullable=False)
+    conf = db.Column(db.Float, nullable=False)
+    pred_date = db.Column(db.Time)
+
 from ultralytics import YOLO
 model = YOLO('best.pt')
+model = model.cuda()
+
 
 @app.route('/detect', methods=['POST'])
 def detect_objects():
-    # 클라이언트로부터 이미지 파일을 받아옴
+    echo = ""
     image_file = request.files['image']
     
-    # 이미지 파일을 OpenCV로 읽어옴
     image = cv2.imdecode(np.frombuffer(image_file.read(), np.uint8), cv2.IMREAD_COLOR)
+    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    cv2.imwrite('capture/image.jpg', image)
+
+    image = np.transpose(image, (2, 0, 1))
+    image = torch.from_numpy(image).unsqueeze(0).float() / 255.0
+    image = image.cuda()
     
-    # YOLOv8을 사용하여 객체 검출 수행
-    result = model(image, max_det=1).cuda()
+    result = model(image, max_det=1)
     result = result[0]
-    box = result.boxes
-    cls = int(box[0].cls)
-    probs = result.probs
-    pred_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if result.__len__() > 0: 
+        cv2.imwrite('results/result.jpg', result.plot())
+        box = result.boxes
+        cls = result.names[box.cls.item()]
+        conf = box.conf.item()
+        pred_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        save(cls, conf, pred_time)
+        echo = cls
 
-    im_array = result.plot()  # plot a BGR numpy array of predictions
-    im = Image.fromarray(im_array[..., ::-1])  # RGB PIL image
-    im.save('results/result.jpg')  # save image
+    return echo
 
-    # 검출된 객체 정보를 MySQL DB에 저장
-    # MySQL DB에 접속
-    db = mysql.connector.connect(
-        host="112.175.185.132",
-        user="rkdtjddn132",
-        password="tjddn132!",
-        database="rkdtjddn132"
-    )
-    cursor = db.cursor()
 
-    # 검출 결과를 MySQL DB에 저장
-    # table: trash_pred, value: class, probs, pred_time
-    sql = "INSERT INTO trash_pred (class, probs, pred_time) VALUES (%s, %s, %s)"
-    values = (cls, probs, pred_time)
-    cursor.execute(sql, values)
+def save(cls, conf, pred_time):
+    record = TrashPred(cls=cls, conf=conf, pred_date=pred_time)
+    db.session.add(record)
+    db.session.commit()
+    print("Save Object Detection Result to DB")
 
-    # 커밋
-    db.commit()
 
-    # 연결 종료
-    db.close()
-
-    return 'Object detection result saved in MySQL DB'
+@app.route('/', methods=['GET'])
+def test():
+    print("test...")
+    return "hello world!"
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
